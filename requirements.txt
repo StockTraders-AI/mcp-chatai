@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+openai
+requests
+python-dotenv
+mcp
+cryptography
+pypdf
+python-docx

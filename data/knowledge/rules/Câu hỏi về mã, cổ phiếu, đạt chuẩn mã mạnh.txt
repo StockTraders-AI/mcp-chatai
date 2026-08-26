@@ -1,0 +1,60 @@
+Guide Hướng dẫn chuẩn xử lý câu hỏi:
+"Mã [X] bắt đầu mạnh từ khi nào?" hoặc "Mã [X] đạt chuẩn mã mạnh từ khi nào?"
+Bước 1: Gọi API getSMDTTickerCross, với keyValue = [mã cổ phiếu], không truyền date.
+Bước 2: Trong kết quả trả về, luôn lấy bản ghi có date mới nhất trong mảng smdts (last date) để trả lời. Không tìm ngày đầu tiên trong lịch sử.
+
+Guide Đối với các câu hỏi như:
+"Hôm qua mã nào đạt chuẩn mã mạnh?", "Cho tôi danh sách mã mạnh vào yyyy-mm-dd hoặc mm/yyyy hoặc yyyy"
+"Tháng mm/yyyy mã nào đạt chuẩn mã mạnh?", "Năm yyyy mã nào đạt chuẩn mã mạnh?"
+"Mã nào đạt chuẩn mã mạnh vào tháng mm-yyyy", "Mã nào đạt chuẩn mã mạnh vào năm yyyy"
+Gọi API getSMDTTickerCross với date tương ứng. Hỏi ngày → truyền yyyy-mm-dd. Hỏi tháng → truyền yyyy-mm. Hỏi năm → truyền yyyy
+Nếu 1 ngành/mã có nhiều mốc thời gian. Cần trình bày tất cả các mốc theo đúng thứ tự thời gian và ghi rõ:
+Ví dụ:
+Mốc đầu tiên: dùng cụm từ "bắt đầu mạnh từ ngày..."
+Các mốc sau: dùng cụm từ "và tiếp tục đạt chuẩn mã mạnh lại từ ngày..."
+Ví dụ chuẩn:
+SSI bắt đầu mạnh từ ngày 20/11 với 72.36% và bắt đầu tiếp tục đạt chuẩn mã mạnh vào ngày 22/11 với 71.02%
+
+Guide Mỗi lần người dùng hỏi đến chỉ số của mã nào đó trong khoảng phiên nào đó
+(ví dụ 10, 20 phiên gần nhất):
+Gọi API getTotalTrade, sau đó truyền:
+
+ticker = mã được hỏi
+lastDates = số phiên được hỏi
+
+Sau đó liệt kê giá của tất cả các phiên đó.
+
+
+Guide Khi người dùng yêu cầu: "Lập bảng thống kê [Mã] trong tháng, trong năm hoặc trong khoảng thời gian dài", cần xử lý như sau:
+
+Gọi API getTotalTrade với ticker = mã được hỏi.
+
+Nếu yêu cầu là:
+
+Một tháng cụ thể → truyền date = YYYY-MM
+
+Một năm cụ thể → truyền date = YYYY
+
+Nếu là khoảng thời gian kéo dài từ tháng này sang tháng khác → gọi API nhiều lần, mỗi lần với date = từng tháng (YYYY-MM).
+
+Nếu là khoảng thời gian từ năm này qua năm khác → gọi API nhiều lần, mỗi lần với date = từng năm (YYYY) theo đúng trình tự thời gian. Không gộp vào một lần.
+
+Tuyệt đối không bỏ qua bất kỳ năm nào trong chuỗi thời gian nếu truy vấn trải dài nhiều năm.
+
+Ví dụ:
+
+Nếu người dùng hỏi "từ 2022 đến nay", thì phải gọi lần lượt:
+
+date = 2022
+date = 2023
+date = 2024
+date = 2025
+
+Sau đó ghép dữ liệu từ tất cả các năm lại để trả về bảng thống kê hoàn chỉnh.
+
+Guide Hướng dẫn xử lý câu hỏi:
+"[Ngày] cổ phiếu nào mạnh nhất dòng [ngành X]?"
+Gọi API getSMDTTicker với:
+date = ngày được hỏi
+keyValue = từng mã trong list mã của ngành được hỏi
+Mã nào có SMDT cao nhất chính là cổ phiếu mạnh nhất ngành tại thời điểm truy vấn.
