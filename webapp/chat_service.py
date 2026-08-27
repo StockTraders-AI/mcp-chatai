@@ -160,7 +160,21 @@ class MissingApiKeyError(Exception):
     pass
 
 
-def chat(user_id: str, user_text: str, provider: str = "openai", model: Optional[str] = None) -> str:
+def _empty_usage() -> Dict[str, int]:
+    return {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+
+
+def _add_usage(total: Dict[str, int], input_tokens: int, output_tokens: int) -> None:
+    total["input_tokens"] += input_tokens
+    total["output_tokens"] += output_tokens
+    total["total_tokens"] += input_tokens + output_tokens
+
+
+def chat(user_id: str, user_text: str, provider: str = "openai", model: Optional[str] = None) -> Dict[str, Any]:
+    """Returns {"answer": str, "usage": {"input_tokens", "output_tokens",
+    "total_tokens"}} - usage is summed across every tool-calling round trip
+    in the loop, not just the final call, since each round trip re-sends
+    the growing message history and costs its own input+output tokens."""
     if provider == "openai":
         return _chat_openai(user_id, user_text, model)
     if provider == "anthropic":
@@ -168,7 +182,7 @@ def chat(user_id: str, user_text: str, provider: str = "openai", model: Optional
     raise ValueError(f"Unknown provider '{provider}', expected 'openai' or 'anthropic'")
 
 
-def _chat_openai(user_id: str, user_text: str, model: Optional[str]) -> str:
+def _chat_openai(user_id: str, user_text: str, model: Optional[str]) -> Dict[str, Any]:
     api_key = get_key(user_id, "openai")
     if not api_key:
         raise MissingApiKeyError(
@@ -196,6 +210,7 @@ def _chat_openai(user_id: str, user_text: str, model: Optional[str]) -> str:
     # if the question is unambiguously about cash flow, don't even offer
     # the model a choice - only the 2 real cash-flow tools are on the menu.
     force_cashflow = is_pure_cashflow_query(user_text)
+    usage = _empty_usage()
 
     for loop_index in range(MAX_TOOL_LOOPS):
         if force_cashflow and loop_index == 0:
@@ -211,10 +226,12 @@ def _chat_openai(user_id: str, user_text: str, model: Optional[str]) -> str:
             tools=turn_tools,
             tool_choice=turn_tool_choice,
         )
+        if resp.usage:
+            _add_usage(usage, resp.usage.prompt_tokens, resp.usage.completion_tokens)
         msg = resp.choices[0].message
 
         if not msg.tool_calls:
-            return msg.content or ""
+            return {"answer": msg.content or "", "usage": usage}
 
         messages.append(
             {
@@ -247,10 +264,10 @@ def _chat_openai(user_id: str, user_text: str, model: Optional[str]) -> str:
                 }
             )
 
-    return "Vuot qua so lan goi tool cho phep, vui long thu lai voi cau hoi cu the hon."
+    return {"answer": "Vuot qua so lan goi tool cho phep, vui long thu lai voi cau hoi cu the hon.", "usage": usage}
 
 
-def _chat_anthropic(user_id: str, user_text: str, model: Optional[str]) -> str:
+def _chat_anthropic(user_id: str, user_text: str, model: Optional[str]) -> Dict[str, Any]:
     api_key = get_key(user_id, "anthropic")
     if not api_key:
         raise MissingApiKeyError(
@@ -272,6 +289,7 @@ def _chat_anthropic(user_id: str, user_text: str, model: Optional[str]) -> str:
     # the tools list itself and forces tool_choice="any" (must call one of
     # the tools offered) on the first turn only.
     force_cashflow = is_pure_cashflow_query(user_text)
+    usage = _empty_usage()
 
     for loop_index in range(MAX_TOOL_LOOPS):
         if force_cashflow and loop_index == 0:
@@ -289,12 +307,14 @@ def _chat_anthropic(user_id: str, user_text: str, model: Optional[str]) -> str:
             tools=turn_tools,
             tool_choice=turn_tool_choice,
         )
+        if resp.usage:
+            _add_usage(usage, resp.usage.input_tokens, resp.usage.output_tokens)
 
         tool_use_blocks = [b for b in resp.content if b.type == "tool_use"]
 
         if not tool_use_blocks:
             text_blocks = [b.text for b in resp.content if b.type == "text"]
-            return "\n".join(text_blocks)
+            return {"answer": "\n".join(text_blocks), "usage": usage}
 
         messages.append({"role": "assistant", "content": resp.content})
 
@@ -310,4 +330,4 @@ def _chat_anthropic(user_id: str, user_text: str, model: Optional[str]) -> str:
             )
         messages.append({"role": "user", "content": tool_result_blocks})
 
-    return "Vuot qua so lan goi tool cho phep, vui long thu lai voi cau hoi cu the hon."
+    return {"answer": "Vuot qua so lan goi tool cho phep, vui long thu lai voi cau hoi cu the hon.", "usage": usage}

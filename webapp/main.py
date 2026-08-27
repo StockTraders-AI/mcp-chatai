@@ -53,12 +53,12 @@ def list_providers():
 @app.post("/chat")
 def chat_endpoint(req: ChatRequest):
     try:
-        answer = chat(req.user_id, req.message, provider=req.provider, model=req.model)
+        result = chat(req.user_id, req.message, provider=req.provider, model=req.model)
     except MissingApiKeyError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"answer": answer}
+    return result
 
 
 @app.get("/health")
