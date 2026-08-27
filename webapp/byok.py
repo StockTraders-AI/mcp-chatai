@@ -49,10 +49,22 @@ def ensure_table():
 
 def save_key(user_id: str, api_key: str, provider: str = "openai"):
     _check_provider(provider)
-    if not api_key or not api_key.strip():
+    api_key = api_key.strip()
+    if not api_key:
         raise ValueError("api_key is empty")
+    if not api_key.isascii():
+        # Real OpenAI/Anthropic keys are always pure ASCII. A non-ASCII
+        # character here is a copy-paste artifact (smart dash, stray
+        # whitespace variant, etc.) that silently corrupts the key - it
+        # decrypts fine later (Fernet doesn't know it's "wrong"), but then
+        # crashes deep inside the SDK's HTTP header encoding at chat time
+        # with a cryptic UnicodeEncodeError instead of a clear message here.
+        raise ValueError(
+            "api_key chua ky tu khong phai ASCII (co the do copy-paste dinh ky tu la) - "
+            "kiem tra lai va dan lai key."
+        )
     ensure_table()
-    encrypted = _fernet.encrypt(api_key.strip().encode("utf-8"))
+    encrypted = _fernet.encrypt(api_key.encode("utf-8"))
     with sqlite3.connect(SQLITE_PATH) as db:
         db.execute(
             """
