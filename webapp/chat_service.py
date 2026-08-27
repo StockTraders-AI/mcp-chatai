@@ -5,9 +5,19 @@ guarantees the "khong duoc thieu case nao" requirement: there is only one
 place tools+guides are defined, so the web app and the MCP server can never
 drift apart the way the old system's 4 separate routing layers did.
 
-Each request uses the calling user's OWN OpenAI API key (BYOK) - retrieved,
-decrypted, and used for exactly this one request. StockTraders' own
-OPENAI_API_KEY is never touched here.
+Each request uses the calling user's OWN API key (BYOK) for whichever
+provider they picked - OpenAI or Anthropic (Claude) - retrieved, decrypted,
+and used for exactly this one request. StockTraders never uses its own key
+for user chat, for either provider.
+
+OpenAI and Anthropic have incompatible tool-calling wire formats (OpenAI:
+tools[].function.parameters, assistant tool_calls, role="tool" result
+messages; Anthropic: tools[].input_schema, tool_use/tool_result content
+blocks inside role="user"/"assistant" messages, system as a top-level
+param not a message) - so the two providers get separate loop functions
+below, but both are built from the exact same `tools`/SYSTEM_PROMPT/
+registry/executor, so behavior only differs where the wire format forces
+it to.
 """
 
 import json
@@ -15,6 +25,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
+from anthropic import Anthropic
 
 from core.tool_registry import ToolRegistry
 from core.executor import APIExecutor
@@ -27,7 +38,12 @@ from core.knowledge import (
     CASH_FLOW_TOOLS,
 )
 from core.response_format import apply_formatter
-from webapp.settings import DEFAULT_CHAT_MODEL, MAX_TOOL_LOOPS
+from webapp.settings import (
+    DEFAULT_CHAT_MODEL,
+    DEFAULT_ANTHROPIC_MODEL,
+    ANTHROPIC_MAX_TOKENS,
+    MAX_TOOL_LOOPS,
+)
 from webapp.byok import get_key
 
 # NOTE: no multi-turn context carry-forward here (see core/context_state.py,
@@ -50,6 +66,48 @@ SYSTEM_PROMPT = (
 _registry: Optional[ToolRegistry] = None
 _executor: Optional[APIExecutor] = None
 
+_EXTRA_TOOLS_OPENAI = [
+    {
+        "type": "function",
+        "function": {
+            "name": "searchCaseIdeas",
+            "description": (
+                "Tim cac FAQ/case bo sung do admin tao (ngoai cac tool du lieu chuan). "
+                "Chi goi khi cau hoi khong khop ro voi bat ky tool du lieu nao khac. "
+                "[QUAN TRONG] Cau hoi dang 'X la gi', 'khai niem X', 'the nao la X' KHONG duoc goi tool "
+                "nay - PHAI goi searchKnowledgeBooks thay vao do, vi do la noi luu dinh nghia chinh thuc."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "searchKnowledgeBooks",
+            "description": (
+                "[GOI TOOL NAY DAU TIEN cho moi cau hoi dang 'X la gi'/'khai niem X'/'the nao la X', "
+                "TRUOC KHI can nhac searchCaseIdeas.] "
+                "Tim kien thuc/khai niem trong tai lieu noi bo StockTraders AI - noi luu dinh nghia CHINH "
+                "THUC cua cac thuat ngu nhu Cho Mua, Mua, Cho Ban, Ban, Chan Song, Song Lon, Song Hoi... "
+                "(HDSD, tieu chi co phieu manh, loi ich giao dich tai chan song lon, vi sao nen mua dung "
+                "day...). Dung khi user hoi 'X la gi', 'khai niem X', 'vi sao nen...', 'tieu chi...' - "
+                "KHONG dung cho cau hoi can so lieu thuc te."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+]
+
 
 def _get_registry() -> ToolRegistry:
     global _registry, _executor
@@ -67,64 +125,61 @@ def _get_executor() -> APIExecutor:
     return _executor
 
 
+def _openai_tools() -> List[Dict[str, Any]]:
+    return list(_get_registry().tools) + _EXTRA_TOOLS_OPENAI
+
+
+def _anthropic_tools() -> List[Dict[str, Any]]:
+    """Same tool set as OpenAI's, reshaped to Anthropic's schema: the
+    function body's name/description/parameters become top-level
+    name/description/input_schema."""
+    anthropic_tools = []
+    for t in _openai_tools():
+        fn = t["function"]
+        anthropic_tools.append(
+            {
+                "name": fn["name"],
+                "description": fn.get("description", ""),
+                "input_schema": fn.get("parameters") or {"type": "object", "properties": {}},
+            }
+        )
+    return anthropic_tools
+
+
+def _run_tool(registry: ToolRegistry, executor: APIExecutor, name: str, args: Dict[str, Any], user_text: str) -> Any:
+    if name == "searchCaseIdeas":
+        return search_case_ideas(str(args.get("query") or ""))
+    if name == "searchKnowledgeBooks":
+        return search_books(str(args.get("query") or ""))
+    real_operation_id = registry.resolve_operation_id(name)
+    raw = executor.call(real_operation_id, args, user_text=user_text)
+    return apply_formatter(real_operation_id, raw, user_text=user_text)
+
+
 class MissingApiKeyError(Exception):
     pass
 
 
-def chat(user_id: str, user_text: str, model: Optional[str] = None) -> str:
-    api_key = get_key(user_id)
+def chat(user_id: str, user_text: str, provider: str = "openai", model: Optional[str] = None) -> str:
+    if provider == "openai":
+        return _chat_openai(user_id, user_text, model)
+    if provider == "anthropic":
+        return _chat_anthropic(user_id, user_text, model)
+    raise ValueError(f"Unknown provider '{provider}', expected 'openai' or 'anthropic'")
+
+
+def _chat_openai(user_id: str, user_text: str, model: Optional[str]) -> str:
+    api_key = get_key(user_id, "openai")
     if not api_key:
         raise MissingApiKeyError(
-            "Chua thiet lap OpenAI API key rieng. Goi POST /auth/key truoc khi chat."
+            "Chua thiet lap OpenAI API key rieng. Goi POST /auth/key (provider=openai) truoc khi chat."
         )
 
     registry = _get_registry()
     executor = _get_executor()
-
-    tools = list(registry.tools) + [
-        {
-            "type": "function",
-            "function": {
-                "name": "searchCaseIdeas",
-                "description": (
-                    "Tim cac FAQ/case bo sung do admin tao (ngoai cac tool du lieu chuan). "
-                    "Chi goi khi cau hoi khong khop ro voi bat ky tool du lieu nao khac. "
-                    "[QUAN TRONG] Cau hoi dang 'X la gi', 'khai niem X', 'the nao la X' KHONG duoc goi tool "
-                    "nay - PHAI goi searchKnowledgeBooks thay vao do, vi do la noi luu dinh nghia chinh thuc."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {"query": {"type": "string"}},
-                    "required": ["query"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "searchKnowledgeBooks",
-                "description": (
-                    "[GOI TOOL NAY DAU TIEN cho moi cau hoi dang 'X la gi'/'khai niem X'/'the nao la X', "
-                    "TRUOC KHI can nhac searchCaseIdeas.] "
-                    "Tim kien thuc/khai niem trong tai lieu noi bo StockTraders AI - noi luu dinh nghia CHINH "
-                    "THUC cua cac thuat ngu nhu Cho Mua, Mua, Cho Ban, Ban, Chan Song, Song Lon, Song Hoi... "
-                    "(HDSD, tieu chi co phieu manh, loi ich giao dich tai chan song lon, vi sao nen mua dung "
-                    "day...). Dung khi user hoi 'X la gi', 'khai niem X', 'vi sao nen...', 'tieu chi...' - "
-                    "KHONG dung cho cau hoi can so lieu thuc te."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {"query": {"type": "string"}},
-                    "required": ["query"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-    ]
+    tools = _openai_tools()
 
     system_text = SYSTEM_PROMPT + f"\n\nNgay hien tai la {datetime.now().strftime('%Y-%m-%d')}"
-
     messages: List[Dict[str, Any]] = [
         {"role": "system", "content": system_text},
         {"role": "user", "content": user_text},
@@ -182,14 +237,7 @@ def chat(user_id: str, user_text: str, model: Optional[str] = None) -> str:
             except Exception:
                 args = {}
 
-            if tc.function.name == "searchCaseIdeas":
-                result = search_case_ideas(str(args.get("query") or ""))
-            elif tc.function.name == "searchKnowledgeBooks":
-                result = search_books(str(args.get("query") or ""))
-            else:
-                real_operation_id = registry.resolve_operation_id(tc.function.name)
-                raw = executor.call(real_operation_id, args, user_text=user_text)
-                result = apply_formatter(real_operation_id, raw, user_text=user_text)
+            result = _run_tool(registry, executor, tc.function.name, args, user_text)
 
             messages.append(
                 {
@@ -198,5 +246,68 @@ def chat(user_id: str, user_text: str, model: Optional[str] = None) -> str:
                     "content": json.dumps(result, ensure_ascii=False),
                 }
             )
+
+    return "Vuot qua so lan goi tool cho phep, vui long thu lai voi cau hoi cu the hon."
+
+
+def _chat_anthropic(user_id: str, user_text: str, model: Optional[str]) -> str:
+    api_key = get_key(user_id, "anthropic")
+    if not api_key:
+        raise MissingApiKeyError(
+            "Chua thiet lap Anthropic API key rieng. Goi POST /auth/key (provider=anthropic) truoc khi chat."
+        )
+
+    registry = _get_registry()
+    executor = _get_executor()
+    tools = _anthropic_tools()
+
+    system_text = SYSTEM_PROMPT + f"\n\nNgay hien tai la {datetime.now().strftime('%Y-%m-%d')}"
+    messages: List[Dict[str, Any]] = [{"role": "user", "content": user_text}]
+
+    client = Anthropic(api_key=api_key)
+    chosen_model = model or DEFAULT_ANTHROPIC_MODEL
+
+    # Same hard override as the OpenAI path (see _chat_openai) - Anthropic
+    # has no "subset of tools, but still optional" mode, so this narrows
+    # the tools list itself and forces tool_choice="any" (must call one of
+    # the tools offered) on the first turn only.
+    force_cashflow = is_pure_cashflow_query(user_text)
+
+    for loop_index in range(MAX_TOOL_LOOPS):
+        if force_cashflow and loop_index == 0:
+            turn_tools = [t for t in tools if t["name"] in CASH_FLOW_TOOLS]
+            turn_tool_choice: Dict[str, Any] = {"type": "any"}
+        else:
+            turn_tools = tools
+            turn_tool_choice = {"type": "auto"}
+
+        resp = client.messages.create(
+            model=chosen_model,
+            max_tokens=ANTHROPIC_MAX_TOKENS,
+            system=system_text,
+            messages=messages,
+            tools=turn_tools,
+            tool_choice=turn_tool_choice,
+        )
+
+        tool_use_blocks = [b for b in resp.content if b.type == "tool_use"]
+
+        if not tool_use_blocks:
+            text_blocks = [b.text for b in resp.content if b.type == "text"]
+            return "\n".join(text_blocks)
+
+        messages.append({"role": "assistant", "content": resp.content})
+
+        tool_result_blocks = []
+        for block in tool_use_blocks:
+            result = _run_tool(registry, executor, block.name, block.input or {}, user_text)
+            tool_result_blocks.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": json.dumps(result, ensure_ascii=False),
+                }
+            )
+        messages.append({"role": "user", "content": tool_result_blocks})
 
     return "Vuot qua so lan goi tool cho phep, vui long thu lai voi cau hoi cu the hon."
