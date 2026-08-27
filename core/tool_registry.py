@@ -101,22 +101,21 @@ class ToolRegistry:
 
         # Real endpoint, same server, confirmed live: POST
         # /service/data/getStock4KeyHistory?ticker=X&group=dd/ds/sd/ss
-        # &date=YYYY-MM-DD|YYYY-MM|YYYY (optional, same convention as
-        # getTotalTrade/getSMDTBranch elsewhere in this API - one "date"
-        # param whose precision controls day/month/year filtering).
-        # Confirmed live: omitting date returns the full history (140
-        # matches for TCB/dd); date=2026-07 correctly filters to just that
-        # month (3 matches) - server-side filtering verified working after
-        # the API owner fixed it (an earlier dateFrom/dateTo pair on this
-        # same endpoint was silently ignored server-side).
-        # Returns every historical date where the ticker matched that
-        # exact 4-key group. Answers "TCB đạt chuẩn đúng sóng đúng ngành
-        # khi nào?" (take the latest entry in matches) and the same
-        # question filtered to a month/year (use date=YYYY-MM or YYYY).
+        # &date=YYYY-MM-DD|YYYY-MM|YYYY (optional) &transition=true (always sent).
+        # transition=true makes the API pre-filter 'matches' down to only the
+        # "chuyen giao" dates: the day a streak of consecutive calendar days
+        # in this group STARTS, not every day still inside that streak (e.g.
+        # if the ticker is in group dd on both 08-24 and 08-25 back to back,
+        # only 08-24 comes back). Added server-side after a client-side
+        # adjacent-date walk turned out to need duplicating in both this repo
+        # and chatbotgpt/ to answer "khi nao" correctly - pushed to the API
+        # instead so there is one source of truth. Client always just takes
+        # the latest entry in matches, whether or not a date filter narrowed
+        # the range.
         self.operations["getStock4KeyHistory"] = {
             "path": "/service/data/getStock4KeyHistory",
             "method": "POST",
-            "summary": "Lay lich su cac moc ngay 1 ma dat dung 1 nhom 4-key cu the (dd/ds/sd/ss).",
+            "summary": "Lay lich su cac moc chuyen giao 1 ma dat dung 1 nhom 4-key cu the (dd/ds/sd/ss).",
             "parameters": [],
         }
         self.tools.append({
@@ -124,14 +123,17 @@ class ToolRegistry:
             "function": {
                 "name": "getStock4KeyHistory",
                 "description": (
-                    "Lay lich su cac moc ngay ma [ticker] dat dung nhom 4-key [group] "
+                    "Lay lich su cac moc NGAY CHUYEN GIAO ma [ticker] bat dau dat dung nhom 4-key [group] "
                     "(dd=dung song dung nganh, ds=dung song sai nganh, sd=sai song dung nganh/dung nganh sai "
-                    "song, ss=sai song sai nganh). Tra ve mang 'matches'. "
+                    "song, ss=sai song sai nganh). LUON truyen transition=true (API se tu loc, chi tra ve "
+                    "ngay BAT DAU moi lan chuyen sang dung nhom nay, khong tra ve cac ngay lien sau van con "
+                    "trong cung 1 dot). Tra ve mang 'matches'. "
                     "Cau hoi '[ticker] dat chuan [nhom 4-key] khi nao?' (khong noi thang/nam): goi khong "
                     "truyen date, lay phan tu co ngay MOI NHAT trong matches de tra loi. "
                     "Cau hoi '...trong thang X/nam Y': truyen date=YYYY-MM. "
                     "Cau hoi '...trong nam Y': truyen date=YYYY. "
-                    "Ca 2 truong hop tren: liet ke TAT CA phan tu trong matches tra ve."
+                    "Ca 2 truong hop tren (co date hay khong): LUON lay phan tu co ngay MOI NHAT (lon nhat) "
+                    "trong matches tra ve de tra loi, khong liet ke het."
                 ),
                 "parameters": {
                     "type": "object",
@@ -142,8 +144,12 @@ class ToolRegistry:
                             "type": "string",
                             "description": "YYYY-MM-DD (1 ngay), YYYY-MM (1 thang), hoac YYYY (1 nam). Bo trong de lay toan bo lich su.",
                         },
+                        "transition": {
+                            "type": "boolean",
+                            "description": "Luon truyen true - chi lay ngay bat dau chuyen giao vao nhom, khong lay ngay tiep dien.",
+                        },
                     },
-                    "required": ["ticker", "group"],
+                    "required": ["ticker", "group", "transition"],
                     "additionalProperties": False,
                 },
             },
