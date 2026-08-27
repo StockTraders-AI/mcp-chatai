@@ -128,7 +128,12 @@ def _run_http(port: int):
     import uvicorn
 
     server = build_server()
-    app = server.streamable_http_app()
+    # host="0.0.0.0" here (distinct from uvicorn's bind host below) tells the MCP SDK
+    # this is a public deployment, so it skips its localhost-only DNS-rebinding lockdown
+    # (server.streamable_http_app() with no args defaults to host="127.0.0.1" internally,
+    # which auto-enables a Host-header allowlist of only 127.0.0.1/localhost and rejects
+    # every other Host header with 421 Invalid Host header).
+    app = server.streamable_http_app(host="0.0.0.0")
     uvicorn.run(app, host="0.0.0.0", port=port)
 
 
