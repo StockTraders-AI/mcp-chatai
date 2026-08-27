@@ -34,12 +34,19 @@ def _escaped_console(value: Any) -> str:
 
 
 def log(*args):
+    """Debug-only console output - must never let a printing failure (e.g.
+    ascii-only stdout on a misconfigured Linux locale) escape and corrupt
+    the actual API response, which happened when this only caught
+    UnicodeEncodeError and something else slipped through."""
     if not DEBUG_API:
         return
     try:
         print(*(_safe_console(arg) for arg in args))
-    except UnicodeEncodeError:
-        print(*(_escaped_console(arg) for arg in args))
+    except Exception:
+        try:
+            print(*(_escaped_console(arg) for arg in args))
+        except Exception:
+            pass
 
 
 _configure_console_encoding()
