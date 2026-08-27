@@ -1,3 +1,4 @@
+import logging
 import sys
 from pathlib import Path
 
@@ -8,6 +9,8 @@ from pydantic import BaseModel
 
 from webapp.byok import save_key, has_key, delete_key, PROVIDERS
 from webapp.chat_service import chat, MissingApiKeyError
+
+logger = logging.getLogger("stocktraders.webapp")
 
 app = FastAPI(title="StockTraders AI - BYOK web chat")
 
@@ -57,7 +60,19 @@ def chat_endpoint(req: ChatRequest):
     except MissingApiKeyError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except ValueError as e:
+        # UnicodeEncodeError/UnicodeError are ValueError subclasses in Python -
+        # a real bug there was silently turning into a misleading 400 here
+        # with no traceback logged, which is exactly what made this bug hard
+        # to pin down. Only genuine validation ValueErrors (e.g. "Unknown
+        # provider") should become a 400; anything Unicode-related is an
+        # actual bug and must be logged with its full traceback and a 500.
+        if isinstance(e, UnicodeError):
+            logger.exception("chat() failed with a Unicode error")
+            raise HTTPException(status_code=500, detail="Loi noi bo (unicode). Da ghi log server de tra cuu.")
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        logger.exception("chat() failed unexpectedly")
+        raise HTTPException(status_code=500, detail="Loi noi bo. Da ghi log server de tra cuu.")
     return result
 
 
