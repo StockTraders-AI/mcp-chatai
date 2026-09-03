@@ -285,20 +285,32 @@ def _read_stock_wave(conn: sqlite3.Connection, args: Dict[str, Any]) -> Optional
         "SELECT * FROM stock_wave WHERE UPPER(name) = ? ORDER BY date", (name_filter,)
     ).fetchall()
 
+    # tickerB/tickerS/tickerWB/tickerwWS are per-ticker breakdown lists that
+    # can run tens of KB per day - fine for a single exact day, but
+    # multiplying that across a month/year range blows past model context
+    # limits (hit in production: 2 month-level calls alone produced 160k+
+    # tokens against GPT-4o's 128k cap). The tool guide (core/knowledge.py)
+    # never asks for these fields anyway - only buy/sell/waitbuy/waitsell/
+    # total/reliability - so they're only included for a single exact-date
+    # lookup (YYYY-MM-DD), never for a month/year range.
+    include_ticker_breakdown = bool(date_filter) and len(date_filter.split("-")) == 3
+
     wave_datas = []
     for row in rows:
         if not _date_matches(row["date"], date_filter):
             continue
-        wave_datas.append({
+        entry = {
             "date": row["date"],
             "buy": row["buy"], "sell": row["sell"],
             "waitbuy": row["waitbuy"], "waitsell": row["waitsell"],
             "total": row["total"], "reliability": row["reliability"],
-            "tickerB": _safe_literal(row["tickerB"]),
-            "tickerS": _safe_literal(row["tickerS"]),
-            "tickerWB": _safe_literal(row["tickerWB"]),
-            "tickerwWS": _safe_literal(row["tickerwWS"]),
-        })
+        }
+        if include_ticker_breakdown:
+            entry["tickerB"] = _safe_literal(row["tickerB"])
+            entry["tickerS"] = _safe_literal(row["tickerS"])
+            entry["tickerWB"] = _safe_literal(row["tickerWB"])
+            entry["tickerwWS"] = _safe_literal(row["tickerwWS"])
+        wave_datas.append(entry)
 
     return {"name": name_filter, "waveDatas": wave_datas}
 
