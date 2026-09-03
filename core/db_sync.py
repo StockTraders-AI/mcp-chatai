@@ -42,7 +42,11 @@ SYNC_INTERVAL_MINUTES = int(os.getenv("STOCKTRADERS_DB_SYNC_MINUTES", "30"))
 
 
 def _post(path: str, payload: Dict[str, Any]) -> Any:
-    resp = requests.post(f"{SERVER_URL}{path}", json=payload, timeout=REQUEST_TIMEOUT)
+    # These endpoints declare their params via FastAPI Query() (see
+    # re-api/routers/*.py) even though the HTTP method is POST - they read
+    # query-string params, not a JSON body. Matches core/executor.py's own
+    # _do_request, which also sends `params=` for POST.
+    resp = requests.post(f"{SERVER_URL}{path}", params=payload, timeout=REQUEST_TIMEOUT)
     resp.raise_for_status()
     return resp.json()
 
