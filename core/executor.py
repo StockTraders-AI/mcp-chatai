@@ -10,7 +10,7 @@ from core.branch_map import extract_branch_path
 from core.branch_tickers import BRANCH_DATA
 from core.stock_4key_evaluator import Stock4KeyError, evaluate_stock_4key
 from core.ticker_policy import invalid_api_ticker, sanitize_api_result
-from core.local_db import DB_BACKED_OPERATIONS, db_mode_enabled, read_from_db
+from core.local_db import DB_BACKED_OPERATIONS, db_mode_enabled, is_asking_about_today, read_from_db
 
 DEBUG_API = True
 POST_REQUEST_TIMEOUT_SECONDS = 900
@@ -381,7 +381,9 @@ class APIExecutor:
                 "unsupported_ticker": True,
             }
 
-        if operation_id in DB_BACKED_OPERATIONS and db_mode_enabled():
+        if operation_id in DB_BACKED_OPERATIONS and db_mode_enabled() and is_asking_about_today(args):
+            log("DB SKIP (question is about today, DB is a periodic snapshot):", operation_id)
+        elif operation_id in DB_BACKED_OPERATIONS and db_mode_enabled():
             db_result = read_from_db(operation_id, args)
             if db_result is not None:
                 log("DB HIT:", operation_id)

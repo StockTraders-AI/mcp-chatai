@@ -26,6 +26,7 @@ import ast
 import csv
 import os
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -48,6 +49,20 @@ DB_BACKED_OPERATIONS = {
 
 def db_mode_enabled() -> bool:
     return str(os.getenv("STOCKTRADERS_DB_MODE", "")).strip() == "1"
+
+
+def is_asking_about_today(args: Dict[str, Any]) -> bool:
+    """The DB is a periodic snapshot, never truly live - a question whose
+    `date` arg is exactly today's date should always go to the live API
+    instead, since the DB may not have today's row yet (sync hasn't run
+    since market close) or may hold a stale intraday value. Only an exact
+    full YYYY-MM-DD match to today triggers this - a month/year filter
+    that happens to include today (e.g. date=2026-09) is a range question,
+    not a "what's happening right now" question, so it still reads DB."""
+    date_arg = str(args.get("date") or "").strip()
+    if len(date_arg) != 10:
+        return False
+    return date_arg == datetime.now().strftime("%Y-%m-%d")
 
 
 # ============================================================

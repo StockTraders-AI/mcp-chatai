@@ -8,3 +8,4 @@ mcp
 cryptography
 pypdf
 python-docx
+apscheduler
