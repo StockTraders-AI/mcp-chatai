@@ -15,7 +15,7 @@ BYOK_ENCRYPTION_KEY: bytes = _env_key.encode("utf-8") if _env_key else Fernet.ge
 
 DEFAULT_CHAT_MODEL = os.getenv("DEFAULT_CHAT_MODEL", "gpt-4o").strip()
 DEFAULT_ANTHROPIC_MODEL = os.getenv("DEFAULT_ANTHROPIC_MODEL", "claude-sonnet-5").strip()
-MAX_TOOL_LOOPS = int(os.getenv("MAX_TOOL_LOOPS", "5"))
+MAX_TOOL_LOOPS = int(os.getenv("MAX_TOOL_LOOPS", "10"))
 ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "2048"))
 
 HOST = os.getenv("HOST", "0.0.0.0")

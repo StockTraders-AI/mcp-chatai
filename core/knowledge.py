@@ -188,9 +188,11 @@ TOOL_GUIDES: Dict[str, List[str]] = {
         "waitsell=số mã CHỜ BÁN, total=tổng số mã theo dõi, reliability=độ tin cậy (%). "
         "Trả lời CHÍNH XÁC số liệu trả về, không tự làm tròn hay suy diễn thêm. "
         'Câu hỏi "thống kê chờ mua/chờ bán/mua/bán từ [ngày] đến nay/trong khoảng [X-Y]" (một KHOẢNG ngày, '
-        "không phải 1 ngày đơn lẻ): tool này chỉ nhận đúng 1 tham số date mỗi lần gọi (không có "
-        "dateFrom/dateTo) — PHẢI gọi LẶP LẠI tool này nhiều lần, mỗi lần date=YYYY-MM-DD cho từng ngày cần, "
-        "hoặc date=YYYY-MM cho cả tháng nếu khoảng hỏi dài, rồi tự ghép kết quả thành bảng theo ngày. "
+        "không phải 1 ngày đơn lẻ): date=YYYY-MM (chỉ tháng, KHÔNG kèm ngày) trả về NGUYÊN CẢ THÁNG đó chỉ "
+        "trong 1 lần gọi — LUÔN gọi theo THÁNG (date=YYYY-MM), KHÔNG gọi từng ngày riêng lẻ (sẽ tốn quá nhiều "
+        "lượt gọi tool và bị chặn). Khoảng ngày hỏi nằm trong bao nhiêu tháng thì gọi đúng bấy nhiêu lần "
+        "(vd hỏi từ 23/8 đến nay, hôm nay là đầu tháng 9: gọi date=2026-08 và date=2026-09, đúng 2 lần), rồi "
+        "từ kết quả mỗi tháng tự lọc lại đúng khoảng ngày được hỏi và ghép thành 1 bảng theo ngày. "
         "TUYỆT ĐỐI KHÔNG dùng getWaveBottomConfirmPairs cho loại câu hỏi này — đó là API hoàn toàn khác "
         "(chỉ tìm các phiên xác nhận tạo đáy đặc biệt, không phải thống kê chờ mua/chờ bán hàng ngày).",
     ],
