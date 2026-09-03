@@ -186,7 +186,13 @@ TOOL_GUIDES: Dict[str, List[str]] = {
         "Câu hỏi về số lượng mua/bán, chờ mua, chờ bán, độ tin cậy: truyền date được hỏi (hoặc hôm nay nếu "
         "không nói ngày). Các trường: buy=số mã tín hiệu MUA, sell=số mã tín hiệu BÁN, waitbuy=số mã CHỜ MUA, "
         "waitsell=số mã CHỜ BÁN, total=tổng số mã theo dõi, reliability=độ tin cậy (%). "
-        "Trả lời CHÍNH XÁC số liệu trả về, không tự làm tròn hay suy diễn thêm.",
+        "Trả lời CHÍNH XÁC số liệu trả về, không tự làm tròn hay suy diễn thêm. "
+        'Câu hỏi "thống kê chờ mua/chờ bán/mua/bán từ [ngày] đến nay/trong khoảng [X-Y]" (một KHOẢNG ngày, '
+        "không phải 1 ngày đơn lẻ): tool này chỉ nhận đúng 1 tham số date mỗi lần gọi (không có "
+        "dateFrom/dateTo) — PHẢI gọi LẶP LẠI tool này nhiều lần, mỗi lần date=YYYY-MM-DD cho từng ngày cần, "
+        "hoặc date=YYYY-MM cho cả tháng nếu khoảng hỏi dài, rồi tự ghép kết quả thành bảng theo ngày. "
+        "TUYỆT ĐỐI KHÔNG dùng getWaveBottomConfirmPairs cho loại câu hỏi này — đó là API hoàn toàn khác "
+        "(chỉ tìm các phiên xác nhận tạo đáy đặc biệt, không phải thống kê chờ mua/chờ bán hàng ngày).",
     ],
     "getSMDTBranch": [
         'Câu hỏi "sức mạnh dòng tiền (SMDT) các ngành chủ lực ngày [date]" hoặc "SMDT ngành chủ lực vào '
@@ -284,6 +290,10 @@ TOOL_GUIDES: Dict[str, List[str]] = {
         "không tự diễn giải định nghĩa sóng lớn/sóng hồi bằng suy luận chung chung.",
     ],
     "getWaveBottomConfirmPairs": [
+        "CHỈ dùng cho câu hỏi về sự kiện ĐẶC BIỆT 'chân sóng'/'tạo đáy' (chuẩn bị tạo đáy, xác nhận tạo đáy) "
+        "— KHÔNG dùng cho câu hỏi thống kê chờ mua/chờ bán/mua/bán THEO NGÀY hay THEO KHOẢNG NGÀY (kể cả khi "
+        "câu hỏi có chữ 'chờ mua' và có vẻ cần 1 khoảng ngày) — loại đó PHẢI dùng getStockWave gọi lặp lại "
+        "nhiều lần theo từng ngày/tháng, KHÔNG phải tool này. "
         'Câu hỏi "chân sóng gần nhất là ngày nào?": gọi không truyền tham số, lấy phần tử có '
         "confirm_wave_date MỚI NHẤT trong mảng pairs trả về, trả lời ngày đó. "
         'Câu hỏi "phiên chuẩn bị tạo đáy gần nhất là ngày nào?": lấy prepare_bottom_date MỚI NHẤT thay vì '
