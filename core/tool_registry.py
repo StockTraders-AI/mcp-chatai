@@ -123,17 +123,21 @@ class ToolRegistry:
             "function": {
                 "name": "getStock4KeyHistory",
                 "description": (
-                    "Lay lich su cac moc NGAY CHUYEN GIAO ma [ticker] bat dau dat dung nhom 4-key [group] "
-                    "(dd=dung song dung nganh, ds=dung song sai nganh, sd=sai song dung nganh/dung nganh sai "
-                    "song, ss=sai song sai nganh). LUON truyen transition=true (API se tu loc, chi tra ve "
-                    "ngay BAT DAU moi lan chuyen sang dung nhom nay, khong tra ve cac ngay lien sau van con "
-                    "trong cung 1 dot). Tra ve mang 'matches'. "
-                    "Cau hoi '[ticker] dat chuan [nhom 4-key] khi nao?' (khong noi thang/nam): goi khong "
-                    "truyen date, lay phan tu co ngay MOI NHAT trong matches de tra loi. "
-                    "Cau hoi '...trong thang X/nam Y': truyen date=YYYY-MM. "
-                    "Cau hoi '...trong nam Y': truyen date=YYYY. "
-                    "Ca 2 truong hop tren (co date hay khong): LUON lay phan tu co ngay MOI NHAT (lon nhat) "
-                    "trong matches tra ve de tra loi, khong liet ke het."
+                    "Lay lich su 4-key cua 1 ma theo thoi gian. "
+                    "CACH 1 - hoi mot nhom 4-key cu the, VD '[ticker] dat chuan [nhom 4-key] khi nao?': "
+                    "truyen group (dd=dung song dung nganh, ds=dung song sai nganh, sd=sai song dung nganh/"
+                    "dung nganh sai song, ss=sai song sai nganh) VA transition=true (API se tu loc, chi tra "
+                    "ve ngay BAT DAU moi lan chuyen sang dung nhom nay, khong tra ve cac ngay lien sau van "
+                    "con trong cung 1 dot). Khong noi thang/nam: goi khong truyen date, lay phan tu co ngay "
+                    "MOI NHAT trong matches de tra loi. '...trong thang X/nam Y': truyen date=YYYY-MM. "
+                    "'...trong nam Y': truyen date=YYYY. Ca 2 truong hop nay LUON lay phan tu co ngay MOI "
+                    "NHAT (lon nhat) trong matches de tra loi, khong liet ke het. "
+                    "CACH 2 - hoi danh sach/liet ke DAY DU 4-key cua 1 ma trong 1 khoang thoi gian (VD 'cho "
+                    "toi danh sach 4 key cua TCB thang 8/2026'), khong gan voi 1 nhom cu the: KHONG truyen "
+                    "group va KHONG truyen transition, chi truyen ticker + date=YYYY-MM (thang) hoac YYYY "
+                    "(nam) - API se tra ve toan bo cac ngay giao dich trong khoang do trong mang 'matches', "
+                    "moi phan tu co field 'group_4key' rieng, liet ke DAY DU khong chi lay ngay moi nhat. "
+                    "Tra ve mang 'matches'."
                 ),
                 "parameters": {
                     "type": "object",
@@ -146,10 +150,10 @@ class ToolRegistry:
                         },
                         "transition": {
                             "type": "boolean",
-                            "description": "Luon truyen true - chi lay ngay bat dau chuyen giao vao nhom, khong lay ngay tiep dien.",
+                            "description": "true = chi lay ngay bat dau chuyen giao vao nhom (dung khi co truyen group). Bo trong/false khi muon liet ke day du tat ca cac ngay (Cach 2).",
                         },
                     },
-                    "required": ["ticker", "group", "transition"],
+                    "required": ["ticker"],
                     "additionalProperties": False,
                 },
             },
