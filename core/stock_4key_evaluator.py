@@ -135,13 +135,21 @@ def extract_price_points(payload: Any) -> list[PricePoint]:
 
 def extract_cashflow_points(payload: Any) -> list[CashFlowPoint]:
     points: list[CashFlowPoint] = []
-    for item in _walk(payload):
-        if not isinstance(item, dict) or "date" not in item:
-            continue
-        value = _to_float(item.get("value") or item.get("val") or item.get("score"))
-        content = item.get("content") or item.get("cashflow") or item.get("cashFlow")
-        if value is not None or content:
-            points.append(CashFlowPoint(str(item.get("date"))[:10], value, str(content).strip() if content else None))
+
+    def visit(node: Any, inherited_date: Optional[str] = None) -> None:
+        if isinstance(node, dict):
+            current_date = node.get("date") or inherited_date
+            value = _to_float(node.get("value") or node.get("val") or node.get("score"))
+            content = node.get("content") or node.get("cashflow") or node.get("cashFlow")
+            if current_date and (value is not None or content):
+                points.append(CashFlowPoint(str(current_date)[:10], value, str(content).strip() if content else None))
+            for child in node.values():
+                visit(child, current_date)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child, inherited_date)
+
+    visit(payload)
     return _dedupe_cashflow(points)
 
 
@@ -412,6 +420,9 @@ def _composite_score(
     cash_score = _cashflow_score(cashflow, notes)
     weighted_sum += active_weights["dong_tien"] * cash_score
     breakdown["dong_tien"] = round(cash_score, 1)
+    if cashflow and cashflow.content:
+        breakdown["dong_tien_label"] = cashflow.content
+        notes.append(f"Dong tien: '{cashflow.content}' -> {round(cash_score, 1)} diem")
 
     if "smdt_rank" in active_weights:
         notes.append("Chua co du lieu peer de tinh xep hang nganh -> bo factor nay")
