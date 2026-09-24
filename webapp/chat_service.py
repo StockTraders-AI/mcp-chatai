@@ -46,14 +46,12 @@ from webapp.settings import (
 )
 from webapp.byok import get_key
 
-# Multi-turn context: the client (TuVanAiCard.jsx) sends back a sliding
-# window of its own displayed message history with each request - the
-# server never stores anything itself (still stateless per request, same
-# as the MCP server has to be). This is the "send full history" approach
-# Claude Desktop/ChatGPT use, not the old context_resolver.py-style regex
-# guessing at dates/tickers from raw text, which was the single biggest
-# source of bugs in the old chatbotgpt system this project replaced.
-MAX_HISTORY_MESSAGES = 8  # ~4 exchanges; older turns are dropped client-side too
+# NOTE: no multi-turn context carry-forward here (see core/context_state.py,
+# kept but unused for now) - by explicit decision, the webapp is single-turn
+# stateless per request for the time being, same as the MCP server. If this
+# changes later, the correct fix is sending full conversation history per
+# request (like Claude Desktop/ChatGPT do) so the model carries context
+# forward itself, not reviving the custom carry-forward heuristic.
 
 SYSTEM_PROMPT = (
     "Ban la tro ly du lieu chung khoan StockTraders AI. Tra loi bang tieng Viet, ngan gon, "
@@ -172,43 +170,19 @@ def _add_usage(total: Dict[str, int], input_tokens: int, output_tokens: int) -> 
     total["total_tokens"] += input_tokens + output_tokens
 
 
-def _build_history_messages(history: Optional[List[Dict[str, Any]]]) -> List[Dict[str, str]]:
-    """Turns the client's [{"role": "user"|"ai", "text": ...}, ...] into
-    plain user/assistant messages, trimmed to the last MAX_HISTORY_MESSAGES
-    entries. Only the answer TEXT goes in - never raw tool results (those
-    were never sent to the client in the first place, and the answer text
-    already states whatever date/ticker it used, e.g. "vào ngày 18-09-2026",
-    which is enough for the model to resolve a same-day follow-up)."""
-    if not history:
-        return []
-    trimmed = [h for h in history if str(h.get("text") or "").strip()][-MAX_HISTORY_MESSAGES:]
-    return [
-        {"role": "assistant" if h.get("role") == "ai" else "user", "content": str(h["text"]).strip()}
-        for h in trimmed
-    ]
-
-
-def chat(
-    user_id: str,
-    user_text: str,
-    provider: str = "openai",
-    model: Optional[str] = None,
-    history: Optional[List[Dict[str, Any]]] = None,
-) -> Dict[str, Any]:
+def chat(user_id: str, user_text: str, provider: str = "openai", model: Optional[str] = None) -> Dict[str, Any]:
     """Returns {"answer": str, "usage": {"input_tokens", "output_tokens",
     "total_tokens"}} - usage is summed across every tool-calling round trip
     in the loop, not just the final call, since each round trip re-sends
     the growing message history and costs its own input+output tokens."""
     if provider == "openai":
-        return _chat_openai(user_id, user_text, model, history)
+        return _chat_openai(user_id, user_text, model)
     if provider == "anthropic":
-        return _chat_anthropic(user_id, user_text, model, history)
+        return _chat_anthropic(user_id, user_text, model)
     raise ValueError(f"Unknown provider '{provider}', expected 'openai' or 'anthropic'")
 
 
-def _chat_openai(
-    user_id: str, user_text: str, model: Optional[str], history: Optional[List[Dict[str, Any]]] = None
-) -> Dict[str, Any]:
+def _chat_openai(user_id: str, user_text: str, model: Optional[str]) -> Dict[str, Any]:
     api_key = get_key(user_id, "openai")
     if not api_key:
         raise MissingApiKeyError(
@@ -220,9 +194,10 @@ def _chat_openai(
     tools = _openai_tools()
 
     system_text = SYSTEM_PROMPT + f"\n\nNgay hien tai la {datetime.now().strftime('%Y-%m-%d')}"
-    messages: List[Dict[str, Any]] = [{"role": "system", "content": system_text}]
-    messages.extend(_build_history_messages(history))
-    messages.append({"role": "user", "content": user_text})
+    messages: List[Dict[str, Any]] = [
+        {"role": "system", "content": system_text},
+        {"role": "user", "content": user_text},
+    ]
 
     client = OpenAI(api_key=api_key)
     chosen_model = model or DEFAULT_CHAT_MODEL
@@ -292,9 +267,7 @@ def _chat_openai(
     return {"answer": "Vuot qua so lan goi tool cho phep, vui long thu lai voi cau hoi cu the hon.", "usage": usage}
 
 
-def _chat_anthropic(
-    user_id: str, user_text: str, model: Optional[str], history: Optional[List[Dict[str, Any]]] = None
-) -> Dict[str, Any]:
+def _chat_anthropic(user_id: str, user_text: str, model: Optional[str]) -> Dict[str, Any]:
     api_key = get_key(user_id, "anthropic")
     if not api_key:
         raise MissingApiKeyError(
@@ -306,8 +279,7 @@ def _chat_anthropic(
     tools = _anthropic_tools()
 
     system_text = SYSTEM_PROMPT + f"\n\nNgay hien tai la {datetime.now().strftime('%Y-%m-%d')}"
-    messages: List[Dict[str, Any]] = _build_history_messages(history)
-    messages.append({"role": "user", "content": user_text})
+    messages: List[Dict[str, Any]] = [{"role": "user", "content": user_text}]
 
     client = Anthropic(api_key=api_key)
     chosen_model = model or DEFAULT_ANTHROPIC_MODEL
@@ -319,14 +291,6 @@ def _chat_anthropic(
     force_cashflow = is_pure_cashflow_query(user_text)
     usage = _empty_usage()
 
-    # Prompt caching: the tool list (~20k token, by far the biggest chunk of
-    # every request) and the system prompt are identical across almost every
-    # call - marking the last tool and the system block as cache breakpoints
-    # lets Anthropic reuse that cached prefix instead of billing full price
-    # on every single turn/request. Requires anthropic-beta: prompt-caching
-    # on old SDK versions, but is GA (no beta header) on current ones.
-    cached_system = [{"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}]
-
     for loop_index in range(MAX_TOOL_LOOPS):
         if force_cashflow and loop_index == 0:
             turn_tools = [t for t in tools if t["name"] in CASH_FLOW_TOOLS]
@@ -335,16 +299,12 @@ def _chat_anthropic(
             turn_tools = tools
             turn_tool_choice = {"type": "auto"}
 
-        cached_tools = list(turn_tools)
-        if cached_tools:
-            cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
-
         resp = client.messages.create(
             model=chosen_model,
             max_tokens=ANTHROPIC_MAX_TOKENS,
-            system=cached_system,
+            system=system_text,
             messages=messages,
-            tools=cached_tools,
+            tools=turn_tools,
             tool_choice=turn_tool_choice,
         )
         if resp.usage:
