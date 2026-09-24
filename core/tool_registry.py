@@ -218,6 +218,51 @@ class ToolRegistry:
             },
         })
 
+        # Wraps getSMDTBranchCross(date=...) and filters server-side by
+        # 6-core-branch membership, instead of relying on the model to
+        # remember to filter it manually. Live test showed the model
+        # calling getSMDTBranchCross directly for "dòng nào dẫn sóng vào
+        # [date]" and then skipping the "chỉ giữ 6 ngành chủ lực" step
+        # entirely - it returned non-core branches labeled as "dẫn sóng"
+        # while literally noting in the same answer that they weren't core
+        # branches. The date-based cross/non-cross split is a pure filter
+        # on data already returned by getSMDTBranchCross, so it belongs in
+        # code, not in a prose instruction the model has to re-apply every
+        # single time.
+        self.operations["getBranchesCrossingAt"] = {
+            "path": "",
+            "method": "CUSTOM",
+            "summary": "Loc ngành dat/vuot nguong SMDT (cross) tai 1 moc thoi gian, theo scope core/non_core.",
+            "parameters": [],
+        }
+        self.tools.append({
+            "type": "function",
+            "function": {
+                "name": "getBranchesCrossingAt",
+                "description": (
+                    "Lay danh sach nganh dat/vuot nguong SMDT (cross) tai 1 moc thoi gian (ngay/thang/nam), "
+                    "da loc san theo scope - KHONG can tu loc lai thu cong. "
+                    "scope=core: dung cho cau hoi 'nganh chu luc nao dan song vao [date]' hoac 'dong nao dan "
+                    "song vao [thang/nam]' - CHI tra ve cac nganh thuoc 6 nganh chu luc. "
+                    "scope=non_core: dung cho cau hoi 'dong nao dat chuan nganh manh vao [thang/nam]' (KHONG "
+                    "co chu 'dan song') - CHI tra ve cac nganh KHONG thuoc 6 nganh chu luc. "
+                    "Luon dung tool nay thay vi goi getSMDTBranchCross truc tiep cho 2 dang cau hoi tren."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "date": {
+                            "type": "string",
+                            "description": "YYYY-MM-DD, YYYY-MM, hoac YYYY - moc thoi gian duoc hoi.",
+                        },
+                        "scope": {"type": "string", "enum": ["core", "non_core"]},
+                    },
+                    "required": ["date", "scope"],
+                    "additionalProperties": False,
+                },
+            },
+        })
+
     def _parse_operations(self) -> Dict[str, Dict[str, Any]]:
         ops: Dict[str, Dict[str, Any]] = {}
         paths = self.schema.get("paths", {})

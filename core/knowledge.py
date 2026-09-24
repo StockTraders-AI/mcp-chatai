@@ -113,10 +113,11 @@ duy nhất đại diện ngành đó, KHÔNG phải đếm số mã mạnh trong
   ngày [ngày mới nhất]." Không áp dụng quy trình này cho câu hỏi dạng "Sóng vào [date] ngành nào dẫn
   sóng?" (đó là câu hỏi khác — hỏi tại 1 thời điểm, không phải hỏi mốc bắt đầu).
 - Hỏi "ngành chủ lực nào dẫn sóng vào [date]" hoặc "dòng nào dẫn sóng vào [tháng/năm]": gọi
-  getSMDTBranchCross(date=mốc được hỏi), sau đó CHỈ GIỮ LẠI các ngành nằm trong 6 ngành chủ lực.
+  getBranchesCrossingAt(date=mốc được hỏi, scope="core") — KHÔNG gọi getSMDTBranchCross trực tiếp rồi
+  tự lọc, tool này đã lọc sẵn chỉ trả về 6 ngành chủ lực.
 - Hỏi "dòng nào đạt chuẩn ngành mạnh vào [tháng/năm]" (không nói "dẫn sóng"): gọi
-  getSMDTBranchCross(date=mốc được hỏi), sau đó LOẠI BỎ các ngành thuộc 6 ngành chủ lực, chỉ trả lời
-  các ngành còn lại — ngược lại hoàn toàn với case phía trên.
+  getBranchesCrossingAt(date=mốc được hỏi, scope="non_core") — đã lọc sẵn LOẠI BỎ 6 ngành chủ lực,
+  ngược lại hoàn toàn với case phía trên.
 - Hỏi "ngành chủ lực nào dẫn sóng hôm nay": gọi getSMDTBranch(date=hôm nay) cho từng ngành, lọc
   trong 6 ngành chủ lực có SMDT ≥ 70%.
 - Hỏi "[ngành] mất vai trò dẫn sóng khi nào": gọi getBranchPath lấy path ngành, rồi gọi
@@ -240,10 +241,18 @@ TOOL_GUIDES: Dict[str, List[str]] = {
         'Câu hỏi "thời điểm dòng đạt chuẩn ngành mạnh của mã [X]" (hỏi theo MÃ thay vì tên ngành): trước '
         "tiên xác định mã đó thuộc ngành nào, rồi áp dụng ĐÚNG quy trình như trên với keyName=tên ngành đó "
         "(vẫn chỉ lấy 1 ngày gần nhất, cùng khuôn mẫu trả lời). "
+        "[QUAN TRONG] Câu hỏi 'ngành chủ lực nào dẫn sóng vào [date]', 'dòng nào dẫn sóng vào [tháng/năm]', "
+        "hoặc 'dòng nào đạt chuẩn ngành mạnh vào [tháng/năm]' (hỏi TẠI 1 mốc thời gian, không phải hỏi mốc "
+        "bắt đầu của 1 ngành cụ thể): KHÔNG dùng tool này — dùng getBranchesCrossingAt thay thế, tool đó đã "
+        "tự lọc đúng theo scope, tránh phải tự nhớ lọc thủ công.",
+    ],
+    "getBranchesCrossingAt": [
         'Câu hỏi "ngành chủ lực nào dẫn sóng vào [date]" hoặc "dòng nào dẫn sóng vào [tháng/năm]": truyền '
-        "date=mốc được hỏi, rồi CHỈ GIỮ các ngành thuộc 6 ngành chủ lực. "
+        'date=mốc được hỏi, scope="core". Kết quả trả về đã CHỈ gồm các ngành thuộc 6 ngành chủ lực — trả '
+        "lời trực tiếp theo đúng danh sách trả về, KHÔNG tự lọc thêm hay tự loại bớt ngành nào trong đó. "
         'Câu hỏi "dòng nào đạt chuẩn ngành mạnh vào [tháng/năm]" (không nói "dẫn sóng"): truyền date=mốc '
-        "được hỏi, rồi LOẠI BỎ các ngành thuộc 6 ngành chủ lực, chỉ trả lời ngành còn lại. "
+        'được hỏi, scope="non_core". Kết quả trả về đã LOẠI BỎ 6 ngành chủ lực — trả lời trực tiếp theo '
+        "đúng danh sách trả về. "
         "Xem định nghĩa đầy đủ về dẫn sóng vs đạt chuẩn ngành mạnh trong phần hướng dẫn chung của server.",
     ],
     "getBranchPath": [
@@ -333,7 +342,7 @@ for _smdt_tool in (
     "getSMDTBranch", "getSMDTTicker", "getSMDTTickerCross", "getSMDTBranchCross",
     "getSMDTBranchDrop", "getSMDTTickerDrop", "getSMDTIncreasing3", "getSMDTLastN",
     "getBranchSMDTTickers", "getTopBranchSMDTIncreasing", "getBranchStrongSMDTWithPrice",
-    "getTickersPriceDownSMDTIncreasing",
+    "getTickersPriceDownSMDTIncreasing", "getBranchesCrossingAt",
 ):
     TOOL_GUIDES.setdefault(_smdt_tool, []).insert(0, _CASH_FLOW_VS_SMDT_WARNING)
 

@@ -8,6 +8,7 @@ from typing import Any, Dict
 from core.tool_registry import ToolRegistry
 from core.branch_map import extract_branch_path
 from core.branch_tickers import BRANCH_DATA
+from core.constants import MAIN_BRANCHES
 from core.stock_4key_evaluator import Stock4KeyError, evaluate_stock_4key
 from core.ticker_policy import invalid_api_ticker, sanitize_api_result
 from core.local_db import DB_BACKED_OPERATIONS, db_mode_enabled, is_asking_about_today, read_from_db
@@ -389,6 +390,25 @@ class APIExecutor:
                 log("DB HIT:", operation_id)
                 return db_result
             log("DB MISS (falling back to live API):", operation_id)
+
+        if operation_id == "getBranchesCrossingAt":
+            scope = str(args.get("scope") or "").strip().lower()
+            date_arg = args.get("date")
+            raw = self.call(
+                "getSMDTBranchCross",
+                {"date": date_arg} if date_arg else {},
+                doc_name=doc_name,
+            )
+            if not isinstance(raw, list):
+                log("BRANCHES CROSSING AT: unexpected upstream shape, passing through:", type(raw))
+                return raw
+            core_set = {b.casefold() for b in MAIN_BRANCHES}
+            if scope == "core":
+                return [item for item in raw if str(item.get("keyName") or "").casefold() in core_set]
+            if scope == "non_core":
+                return [item for item in raw if str(item.get("keyName") or "").casefold() not in core_set]
+            log("BRANCHES CROSSING AT: unknown scope, returning unfiltered:", scope)
+            return raw
 
         if operation_id == "getStock4KeyEvaluation":
             try:

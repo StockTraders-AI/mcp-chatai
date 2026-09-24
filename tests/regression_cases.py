@@ -57,7 +57,7 @@ EXPECTED_TOOLS = {
     "getTopBranchSMDTIncreasing", "getBranchStrongSMDTWithPrice",
     "getLeadingCoreBranches", "getCoreBranchLeader",
     "getWaveBottomConfirmPairs", "getStock4KeyEvaluation", "getStock4KeyScreen",
-    "getStock4KeyHistory",
+    "getStock4KeyHistory", "getBranchesCrossingAt",
 }
 check(f"tool registry exposes all {len(EXPECTED_TOOLS)} expected tools", EXPECTED_TOOLS.issubset(tool_names))
 check("no unexpected extra/missing tool count drift", tool_names == EXPECTED_TOOLS)
@@ -69,8 +69,9 @@ for op_id in TOOL_GUIDES:
     check(f"TOOL_GUIDES['{op_id}'] refers to a real registered tool", op_id in tool_names)
 
 # Every data tool that has an actual rule guide in data/knowledge/rules/*.txt
-# must carry that guide. This exact list (26 tools) is what's covered per the
-# full 55-case catalog audit; the 3 gaps (getTotalTradeWithSMDT, getZigZagPoint,
+# must carry that guide. This exact list is what's covered per the full
+# 55-case catalog audit plus getBranchesCrossingAt (added later, not part of
+# that audit); the 3 gaps (getTotalTradeWithSMDT, getZigZagPoint,
 # getBranchPathHap) have no corresponding rule text in the 11 source files, so
 # they correctly fall back to their bare OpenAPI summary only.
 EXPECTED_GUIDED_TOOLS = {
@@ -80,7 +81,7 @@ EXPECTED_GUIDED_TOOLS = {
     "getSMDTBranchDrop", "getSMDTBranchCross", "getBranchPath", "getBranchSMDTTickers",
     "getSMDTLastN", "getTopBranchSMDTIncreasing", "getBranchStrongSMDTWithPrice",
     "getTickersPriceDownSMDTIncreasing", "getDongTienTheoNganh", "getDongTienTheoMa",
-    "getAnalyzeWave", "getWaveBottomConfirmPairs", "getPerformance",
+    "getAnalyzeWave", "getWaveBottomConfirmPairs", "getPerformance", "getBranchesCrossingAt",
 }
 check(f"all {len(EXPECTED_GUIDED_TOOLS)} tools with real rule text carry embedded guidance",
       EXPECTED_GUIDED_TOOLS == set(TOOL_GUIDES.keys()))
