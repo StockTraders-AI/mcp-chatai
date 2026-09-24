@@ -45,13 +45,18 @@ from webapp.settings import (
     MAX_TOOL_LOOPS,
 )
 from webapp.byok import get_key
+from webapp.chat_history_db import append_turn, get_recent_messages
 
-# NOTE: no multi-turn context carry-forward here (see core/context_state.py,
-# kept but unused for now) - by explicit decision, the webapp is single-turn
-# stateless per request for the time being, same as the MCP server. If this
-# changes later, the correct fix is sending full conversation history per
-# request (like Claude Desktop/ChatGPT do) so the model carries context
-# forward itself, not reviving the custom carry-forward heuristic.
+# Multi-turn context: server-side, keyed by a `session_id` the client
+# provides (the frontend's existing `conversation_id` field - today a
+# hardcoded shared value, but the same field that just needs to become
+# unique-per-browser to get real per-session history, no new API field
+# required). If no session_id is given, behavior is unchanged: fully
+# stateless, nothing read or written. This replaces an earlier attempt
+# where the CLIENT sent back its own full text history on every request
+# (reverted) - storing it here instead means the client only has to carry
+# one small id around, not resend growing amounts of text.
+MAX_HISTORY_MESSAGES = 8  # ~4 exchanges
 
 SYSTEM_PROMPT = (
     "Ban la tro ly du lieu chung khoan StockTraders AI. Tra loi bang tieng Viet, ngan gon, "
@@ -170,19 +175,41 @@ def _add_usage(total: Dict[str, int], input_tokens: int, output_tokens: int) -> 
     total["total_tokens"] += input_tokens + output_tokens
 
 
-def chat(user_id: str, user_text: str, provider: str = "openai", model: Optional[str] = None) -> Dict[str, Any]:
+def _history_as_messages(session_id: Optional[str]) -> List[Dict[str, str]]:
+    """DB-stored turns -> plain user/assistant messages, already trimmed to
+    MAX_HISTORY_MESSAGES by get_recent_messages. Only ever the answer TEXT,
+    same as before - never raw tool results (never stored in the first
+    place)."""
+    stored = get_recent_messages(session_id, limit=MAX_HISTORY_MESSAGES) if session_id else []
+    return [{"role": h["role"], "content": h["text"]} for h in stored]
+
+
+def chat(
+    user_id: str,
+    user_text: str,
+    provider: str = "openai",
+    model: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """Returns {"answer": str, "usage": {"input_tokens", "output_tokens",
     "total_tokens"}} - usage is summed across every tool-calling round trip
     in the loop, not just the final call, since each round trip re-sends
     the growing message history and costs its own input+output tokens."""
     if provider == "openai":
-        return _chat_openai(user_id, user_text, model)
-    if provider == "anthropic":
-        return _chat_anthropic(user_id, user_text, model)
-    raise ValueError(f"Unknown provider '{provider}', expected 'openai' or 'anthropic'")
+        result = _chat_openai(user_id, user_text, model, session_id)
+    elif provider == "anthropic":
+        result = _chat_anthropic(user_id, user_text, model, session_id)
+    else:
+        raise ValueError(f"Unknown provider '{provider}', expected 'openai' or 'anthropic'")
+
+    if session_id and result.get("answer"):
+        append_turn(session_id, user_text, result["answer"])
+    return result
 
 
-def _chat_openai(user_id: str, user_text: str, model: Optional[str]) -> Dict[str, Any]:
+def _chat_openai(
+    user_id: str, user_text: str, model: Optional[str], session_id: Optional[str] = None
+) -> Dict[str, Any]:
     api_key = get_key(user_id, "openai")
     if not api_key:
         raise MissingApiKeyError(
@@ -194,10 +221,9 @@ def _chat_openai(user_id: str, user_text: str, model: Optional[str]) -> Dict[str
     tools = _openai_tools()
 
     system_text = SYSTEM_PROMPT + f"\n\nNgay hien tai la {datetime.now().strftime('%Y-%m-%d')}"
-    messages: List[Dict[str, Any]] = [
-        {"role": "system", "content": system_text},
-        {"role": "user", "content": user_text},
-    ]
+    messages: List[Dict[str, Any]] = [{"role": "system", "content": system_text}]
+    messages.extend(_history_as_messages(session_id))
+    messages.append({"role": "user", "content": user_text})
 
     client = OpenAI(api_key=api_key)
     chosen_model = model or DEFAULT_CHAT_MODEL
@@ -267,7 +293,9 @@ def _chat_openai(user_id: str, user_text: str, model: Optional[str]) -> Dict[str
     return {"answer": "Vuot qua so lan goi tool cho phep, vui long thu lai voi cau hoi cu the hon.", "usage": usage}
 
 
-def _chat_anthropic(user_id: str, user_text: str, model: Optional[str]) -> Dict[str, Any]:
+def _chat_anthropic(
+    user_id: str, user_text: str, model: Optional[str], session_id: Optional[str] = None
+) -> Dict[str, Any]:
     api_key = get_key(user_id, "anthropic")
     if not api_key:
         raise MissingApiKeyError(
@@ -279,10 +307,18 @@ def _chat_anthropic(user_id: str, user_text: str, model: Optional[str]) -> Dict[
     tools = _anthropic_tools()
 
     system_text = SYSTEM_PROMPT + f"\n\nNgay hien tai la {datetime.now().strftime('%Y-%m-%d')}"
-    messages: List[Dict[str, Any]] = [{"role": "user", "content": user_text}]
+    system_blocks = [{"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}]
+    messages: List[Dict[str, Any]] = _history_as_messages(session_id)
+    messages.append({"role": "user", "content": user_text})
 
     client = Anthropic(api_key=api_key)
     chosen_model = model or DEFAULT_ANTHROPIC_MODEL
+
+    # Cache the (large, static) tool list too - only the last tool needs the
+    # marker, Anthropic caches everything up to and including it.
+    cached_tools = [dict(t) for t in tools]
+    if cached_tools:
+        cached_tools[-1] = dict(cached_tools[-1], cache_control={"type": "ephemeral"})
 
     # Same hard override as the OpenAI path (see _chat_openai) - Anthropic
     # has no "subset of tools, but still optional" mode, so this narrows
@@ -296,13 +332,13 @@ def _chat_anthropic(user_id: str, user_text: str, model: Optional[str]) -> Dict[
             turn_tools = [t for t in tools if t["name"] in CASH_FLOW_TOOLS]
             turn_tool_choice: Dict[str, Any] = {"type": "any"}
         else:
-            turn_tools = tools
+            turn_tools = cached_tools
             turn_tool_choice = {"type": "auto"}
 
         resp = client.messages.create(
             model=chosen_model,
             max_tokens=ANTHROPIC_MAX_TOKENS,
-            system=system_text,
+            system=system_blocks,
             messages=messages,
             tools=turn_tools,
             tool_choice=turn_tool_choice,

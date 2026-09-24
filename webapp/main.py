@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from webapp.byok import save_key, has_key, delete_key, PROVIDERS
 from webapp.chat_service import chat, MissingApiKeyError
+from webapp.chat_history_db import clear_session
 
 logger = logging.getLogger("stocktraders.webapp")
 
@@ -26,6 +27,7 @@ class ChatRequest(BaseModel):
     message: str
     provider: str = "openai"
     model: str | None = None
+    session_id: str | None = None
 
 
 @app.post("/auth/key")
@@ -56,7 +58,13 @@ def list_providers():
 @app.post("/chat")
 def chat_endpoint(req: ChatRequest):
     try:
-        result = chat(req.user_id, req.message, provider=req.provider, model=req.model)
+        result = chat(
+            req.user_id,
+            req.message,
+            provider=req.provider,
+            model=req.model,
+            session_id=req.session_id,
+        )
     except MissingApiKeyError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except ValueError as e:
@@ -74,6 +82,12 @@ def chat_endpoint(req: ChatRequest):
         logger.exception("chat() failed unexpectedly")
         raise HTTPException(status_code=500, detail="Loi noi bo. Da ghi log server de tra cuu.")
     return result
+
+
+@app.delete("/chat/session")
+def clear_chat_session(session_id: str):
+    clear_session(session_id)
+    return {"ok": True}
 
 
 @app.get("/health")
