@@ -21,11 +21,17 @@ class SaveKeyRequest(BaseModel):
     provider: str = "openai"
 
 
+class HistoryTurn(BaseModel):
+    role: str  # "user" | "ai"
+    text: str
+
+
 class ChatRequest(BaseModel):
     user_id: str
     message: str
     provider: str = "openai"
     model: str | None = None
+    history: list[HistoryTurn] = []
 
 
 @app.post("/auth/key")
@@ -56,7 +62,13 @@ def list_providers():
 @app.post("/chat")
 def chat_endpoint(req: ChatRequest):
     try:
-        result = chat(req.user_id, req.message, provider=req.provider, model=req.model)
+        result = chat(
+            req.user_id,
+            req.message,
+            provider=req.provider,
+            model=req.model,
+            history=[h.model_dump() for h in req.history],
+        )
     except MissingApiKeyError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except ValueError as e:
